@@ -21,11 +21,15 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # runner 自带 Android SDK，只补 platform 和 build-tools
+      # runner 自带 Android SDK，这里只补 platform 和 build-tools
       - name: 安装 platform 36 和 build-tools 36
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMGR="$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$SDKMGR" ]; then SDKMGR="$(command -v sdkmanager)"; fi
+          echo "sdkmanager: $SDKMGR"
+          yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+          "$SDKMGR" "platforms;android-36" "build-tools;36.0.0"
 
       - name: 编译
         run: bash build.sh
