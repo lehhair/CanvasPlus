@@ -21,10 +21,11 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
-
-      - name: 安装 platform 36 和 build-tools
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      # runner 自带 Android SDK，只补 platform 和 build-tools
+      - name: 安装 platform 36 和 build-tools 36
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: 编译
         run: bash build.sh
