@@ -88,8 +88,7 @@ hook 这个方法：
 2. 在前台：发广播 `com.canvasplus.ADD` 给画布，并拦掉小窗
 3. 不在前台：什么都不做，正常开小窗
 
-画布前台状态由画布进程广播 `com.canvasplus.CANVAS_STATE` 维护：
-`onResume` 发 true，`onPause` 发 false，watchdog 每秒补发一次。
+画布前台状态不再跨进程同步，侧边栏点应用时直接问画布进程。
 
 侧边栏进程无法查询其他进程（`getRunningAppProcesses` 只返回自己），所以用广播。
 
@@ -233,14 +232,20 @@ NPE，画布进程崩掉，表现是"点交换，当前应用突然全屏"。
 
 侧边栏点应用只有两个结果：加进画布，或者照旧开小窗。
 
-判断不查任务栈（侧边栏进程没权限，`getTasks` 经常返回空），改用心跳：
+侧边栏进程拿不到任务栈（`ActivityTaskManager.getTasks` 只返回自己的 task），
+也不该猜画布在不在前台，所以判断直接交给画布进程：
 
-- 画布 watchdog 每秒广播 `{count}`，侧边栏记录最近一次时间
-- 3 秒内有心跳说明画布进程还活着
-- 心跳 + `count < 4` → 发 ADD 拦掉小窗，否则不拦
+1. 侧边栏拦下 `startActivityAsZoomWindow`，发一条有序广播 `com.canvasplus.ADD`
+2. 画布收到后看三件事：`Activity.mStopped`、`Activity.mResumed`、窗口数
+3. `mResumed && !mStopped && count < 4` → `setResultCode(1)`，异步加窗口
+4. 否则 `setResultCode(0)`，侧边栏把原来的小窗调用重放一遍
 
-画布的 `visible` 状态不能用来判断：侧边栏面板一弹出，画布就 `onPause`，
-`visible` 立刻变 false，表现就是"第一次点了没反应，第二次才行"。
+`Activity.isVisible()` 不能用：ColorOS 的画布在被侧边栏盖住时，`mDecor`
+的 window visibility 还是 VISIBLE，但这个方法返回 false。看 `mResumed` 就够——
+侧边栏是浮层，不打断画布的 resumed；切到别的应用才会 pause。
+
+回执不是 1 时重放开小窗，参数里有 null，得用 `Method.invoke` 而不是
+`XposedHelpers.callMethod`（后者按参数类型查方法会炸）。
 
 画布收到 ADD 后加窗口的顺序：
 

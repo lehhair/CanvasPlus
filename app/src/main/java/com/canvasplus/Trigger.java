@@ -66,6 +66,14 @@ final class Trigger {
     private static boolean register(ClassLoader loader) {
         if (armed) return true;
         try {
+            // 只有主进程响应广播，画布在子进程里没有 Activity
+            Object process = XposedHelpers.callStaticMethod(
+                    XposedHelpers.findClass("android.app.ActivityThread", loader),
+                    "currentProcessName");
+            if (!"com.oplus.pscanvas".equals(process)) {
+                armed = true;
+                return true;
+            }
             Object thread = XposedHelpers.callStaticMethod(
                     XposedHelpers.findClass("android.app.ActivityThread", loader),
                     "currentActivityThread");
@@ -88,9 +96,19 @@ final class Trigger {
                     }
                     if (ACTION_ADD.equals(intent.getAction())) {
                         String pkg = intent.getStringExtra("pkg");
-                        if (pkg == null || pkg.isEmpty()) return;
-                        log("add " + pkg);
-                        addToCanvas(context, pkg);
+                        if (pkg == null || pkg.isEmpty()) {
+                            setResultCode(0);
+                            return;
+                        }
+                        Object activity = currentCanvas();
+                        int count = activity == null ? -1 : canvasCount(activity);
+                        boolean visible = isForeground(activity);
+                        boolean room = count >= 0 && count < 4;
+                        log("add request " + pkg + " visible=" + visible + " count=" + count);
+                        if (intent.getBooleanExtra("ordered", false)) {
+                            setResultCode(visible && room ? 1 : 0);
+                        }
+                        if (visible && room) addToCanvas(context, pkg);
                         return;
                     }
                     if (!ACTION_START.equals(intent.getAction())) return;
@@ -248,6 +266,21 @@ final class Trigger {
             log("add intent sent " + pkg);
         } catch (Throwable error) {
             log("add intent failed: " + error);
+        }
+    }
+
+    /**
+     * 画布在不在前台。这里的 isVisible() 拿到的值不对（decor 明明是 VISIBLE
+     * 却返回 false），直接看 Activity 自己的两个状态字段：
+     * 侧边栏盖上来不打断 resumed，切到别的应用才会 pause。
+     */
+    private static boolean isForeground(Object activity) {
+        if (activity == null) return false;
+        try {
+            if (XposedHelpers.getBooleanField(activity, "mStopped")) return false;
+            return XposedHelpers.getBooleanField(activity, "mResumed");
+        } catch (Throwable error) {
+            return false;
         }
     }
 

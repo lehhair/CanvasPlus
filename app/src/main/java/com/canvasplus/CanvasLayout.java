@@ -917,7 +917,6 @@ final class CanvasLayout {
 
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     forcePhoneSize(param.thisObject);
-                    broadcastState(true);
                     oLock = false;
                     if (forcedOrientation != 0) {
                         relayoutDirected(param.thisObject,
@@ -1047,27 +1046,6 @@ final class CanvasLayout {
         return -1;
     }
 
-    /** 画布当前是否在前台，watchdog 心跳用它，别再固定报 true。 */
-    private static volatile boolean canvasVisibleState = false;
-
-    private static void broadcastState(boolean visible) {
-        canvasVisibleState = visible;
-        try {
-            Object ctx = XposedHelpers.callStaticMethod(
-                    XposedHelpers.findClass("android.app.ActivityThread", null),
-                    "currentApplication");
-            if (!(ctx instanceof android.content.Context)) return;
-            Intent state = new Intent("com.canvasplus.CANVAS_STATE");
-            state.setPackage("com.coloros.smartsidebar");
-            state.putExtra("visible", visible);
-            state.putExtra("count", currentCanvasCount());
-            ((android.content.Context) ctx).sendBroadcast(state);
-            log("canvas state " + visible + " count=" + currentCanvasCount());
-        } catch (Throwable error) {
-            log("canvas state broadcast failed: " + error);
-        }
-    }
-
     /** 画布被切走再回来时任务已经恢复成全屏，重新套一遍。 */
     private static void hookResume(ClassLoader loader) {
         try {
@@ -1075,7 +1053,6 @@ final class CanvasLayout {
                     "com.oplus.pscanvas.canvasmode.canvas.ContainerActivity", loader);
             XposedHelpers.findAndHookMethod(activity, "onResume", new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
-                    broadcastState(true);
                     try {
                         Object view = XposedHelpers.callMethod(param.thisObject, "x0");
                         if (view == null) return;
@@ -1093,11 +1070,6 @@ final class CanvasLayout {
                                 }, 800);
                     } catch (Throwable ignored) {
                     }
-                }
-            });
-            XposedHelpers.findAndHookMethod(activity, "onPause", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam param) {
-                    broadcastState(false);
                 }
             });
             log("resume hooked");
@@ -1158,7 +1130,7 @@ final class CanvasLayout {
     private static final java.util.WeakHashMap<Object, Boolean> watchdogs =
             new java.util.WeakHashMap<>();
 
-    /** 定期检查任务尺寸，同时给侧边栏发心跳：只在画布可见时发。 */
+    /** 定期检查任务尺寸，画布切回来以后任务可能被系统恢复成全屏。 */
     private static void startWatchdog(Object view) {
         if (watchdogs.containsKey(view)) return;
         watchdogs.put(view, Boolean.TRUE);
@@ -1169,27 +1141,12 @@ final class CanvasLayout {
                 try {
                     syncTaskData(view);
                     forcePhoneSize(view);
-                    broadcastState(canvasShown(view));
                 } catch (Throwable ignored) {
                 }
                 handler.postDelayed(this, 1000);
             }
         }, 500);
         log("watchdog started");
-    }
-
-    /**
-     * 画布窗口当前是不是可见。侧边栏是悬浮窗，盖在画布上时 isVisible 仍然是
-     * true，切到别的应用才变 false，正好用来当"在不在分屏界面"。
-     */
-    private static boolean canvasShown(Object view) {
-        try {
-            Object context = ((android.view.View) view).getContext();
-            Object visible = XposedHelpers.callMethod(context, "isVisible");
-            if (visible instanceof Boolean) return (Boolean) visible;
-        } catch (Throwable ignored) {
-        }
-        return false;
     }
 
     /** 三窗四窗都用整屏比例的任务，窗口大小由布局决定。 */

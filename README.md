@@ -56,7 +56,7 @@ debug keystore 不存在时脚本会自动生成一个。
    - **智能侧边栏** `com.coloros.smartsidebar`
 3. 重启一次，让画布和侧边栏进程重新加载模块
 
-系统框架（`android`）和桌面（`com.android.launcher`）里的 hook 代码还在，但默认不在作用域里：放开窗口数量上限、最近任务入口走画布，不做也不影响正常使用。
+不碰 `android`（system_server）和桌面进程，所有逻辑都在画布和侧边栏自己的进程里。
 
 ## 使用
 

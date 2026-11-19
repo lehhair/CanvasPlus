@@ -13,8 +13,8 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * 模块做的事：
  *   1. 放开窗口数量判断，四窗接进官方的 w1 → N2 → M1 布局链路
  *   2. 布局、调节条、焦点缩放、关闭、浮窗全部走原实现，只补四窗缺的分支
- *   3. 智能侧边栏点应用时加进当前画布，满了（4 个）就还是开小窗
- *   4. 桌面快捷方式直接打开四窗
+ *   3. 智能侧边栏点应用时问画布能不能接，满了（4 个）就还是开小窗
+ *   4. 广播入口：START 一次拉多个应用进画布，ADD 加一个
  *
  * 安全阀：/data/system/canvasplus-halt 存在时完全不加载。
  */
@@ -25,15 +25,9 @@ public final class ModuleEntry implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
         if (param == null || param.packageName == null) return;
+        if (halted()) return;
 
         switch (param.packageName) {
-            // 下面两个进程默认不在作用域里，留着是为了以后需要时手动勾选
-            case "android":
-                if (halted()) return;
-                FeatureUnlock.installSystem(param.classLoader);
-                Trigger.arm(param.classLoader);
-                break;
-
             case "com.oplus.pscanvas":
                 // 画布容器进程，布局问题的真正位置。
                 CanvasLayout.install(param.classLoader);
@@ -41,12 +35,8 @@ public final class ModuleEntry implements IXposedHookLoadPackage {
                 break;
 
             case "com.coloros.smartsidebar":
-                // 智能侧边栏：画布前台时点应用直接加进画布。
+                // 智能侧边栏：点应用时问画布能不能接，接不了才开小窗。
                 SidebarEntry.install(param.classLoader);
-                break;
-
-            case "com.android.launcher":
-                FeatureUnlock.installLauncher(param.classLoader);
                 break;
 
             default:

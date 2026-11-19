@@ -241,15 +241,14 @@ A 的数学限制：窗口宽高比 = 应用宽高比 = 1264/2780 = 0.4545。要
 
 ## 四、当前模块
 
-作用域只需要 `com.oplus.pscanvas`。
+作用域只有 `com.oplus.pscanvas` 和 `com.coloros.smartsidebar`，不碰系统框架。
 
 | 文件 | 作用 |
 |---|---|
 | `ModuleEntry` | 按进程分发，`/data/system/canvasplus-halt` 停止阀 |
-| `FeatureUnlock` | feature 开关、`getMaxWinNum`、Launcher 入口 |
 | `CanvasLayout` | 画布布局、四窗、菜单、交换、关闭、浮窗 |
 | `Trigger` | 广播入口，加窗口 |
-| `SidebarEntry` | 智能侧边栏加窗口 |
+| `SidebarEntry` | 智能侧边栏：问画布能不能接新窗口 |
 
 `CanvasLayout` 装的 hook：
 
