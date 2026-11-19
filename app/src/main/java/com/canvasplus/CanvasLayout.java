@@ -100,6 +100,46 @@ final class CanvasLayout {
         hookExchange(loader);
         hookWindowMenu(loader);
         hookFourZoom(loader);
+        hookTouchRegion(loader);
+    }
+
+    /**
+     * 键盘抬起画布后窗口顶边会跑到屏幕上方。framework 里 FlexibleTaskView 的
+     * 内边距监听要先确认整个窗口都落在屏幕内，只要有一部分出界就整段跳过，
+     * 不给画布窗口挖洞，画布于是吃掉全屏触摸，子窗口点不到。
+     * 这里在它跳过后补一次，出界的部分交集运算会自己裁掉。
+     */
+    private static void hookTouchRegion(ClassLoader loader) {
+        try {
+            Class<?> listener = XposedHelpers.findClass(
+                    "com.oplus.flexiblewindow.FlexibleTaskView$FlexibleOnComputeInternalInsetsListener",
+                    loader);
+            XposedBridge.hookAllMethods(listener, "onComputeInternalInsets",
+                    new XC_MethodHook() {
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                Object view = XposedHelpers.getObjectField(
+                                        param.thisObject, "this$0");
+                                if (view == null) return;
+                                if (XposedHelpers.getBooleanField(view, "mInterceptInputEvent")) {
+                                    return;
+                                }
+                                Rect rect = new Rect();
+                                XposedHelpers.callMethod(view, "getBoundsOnScreen", rect);
+                                if (rect.isEmpty()) return;
+                                Object info = param.args[0];
+                                XposedHelpers.callMethod(info, "setTouchableInsets", 3);
+                                android.graphics.Region region = (android.graphics.Region)
+                                        XposedHelpers.getObjectField(info, "touchableRegion");
+                                region.op(rect, android.graphics.Region.Op.DIFFERENCE);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    });
+            log("touch region hooked");
+        } catch (Throwable error) {
+            log("touch region hook failed: " + error);
+        }
     }
 
     /**
