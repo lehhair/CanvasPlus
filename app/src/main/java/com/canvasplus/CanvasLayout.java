@@ -1207,6 +1207,8 @@ final class CanvasLayout {
                             try {
                                 Object adapter = fieldOfType(param.thisObject, "u1.c");
                                 int total = adapter == null ? 0 : count(adapter);
+                                // 二窗是系统原生分屏，点击走原版聚焦
+                                if (total < 3) return;
                                 if (total == 4) {
                                     // 四窗点窗口就是放大：同步状态，菜单才会变成"缩小窗口"
                                     fourZoomed.put(param.thisObject, Boolean.TRUE);
@@ -1601,6 +1603,8 @@ final class CanvasLayout {
             Class<?> adapter = XposedHelpers.findClass("u1.c", loader);
             XposedBridge.hookAllMethods(adapter, "j", new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
+                    // 二窗是系统原生分屏，布局方向交给原版
+                    if (count(param.thisObject) < 3) return;
                     param.setResult(Boolean.FALSE);
                 }
             });
