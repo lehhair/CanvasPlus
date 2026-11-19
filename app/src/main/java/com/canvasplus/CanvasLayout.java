@@ -29,7 +29,7 @@ final class CanvasLayout {
             "com.oplus.flexiblewindow.FlexibleTaskView";
     static volatile int forcedMode = 0;
     /** 三分屏布局方向，默认 6 = 一左两右，0 表示交给系统。 */
-    static volatile int forcedOrientation = 0;
+    static volatile int forcedOrientation = 6;
     private static int attempts = 0;
     private static volatile boolean relayoutScheduled = false;
     private static final java.util.WeakHashMap<Object, String> layoutKeys =
