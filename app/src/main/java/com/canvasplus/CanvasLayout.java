@@ -249,6 +249,31 @@ final class CanvasLayout {
         }
     }
 
+    /** 布局后的基准平移量，输入法偏移以它为原点。 */
+    private static final java.util.WeakHashMap<Object, Float> layoutTy =
+            new java.util.WeakHashMap<>();
+
+    /**
+     * 输入法高度变化：o1(int) 是画布自己从 window insets 里读到的 IME 高度，
+     * 键盘弹出就把画布整体往上抬这么多，收起回到基准位置。
+     */
+    private static void shiftForIme(XC_MethodHook.MethodHookParam param) {
+        try {
+            int ime = (Integer) param.args[0];
+            Object view = XposedHelpers.callMethod(param.thisObject, "x0");
+            if (view == null) return;
+            Float base = layoutTy.get(view);
+            if (base == null) return;
+            android.view.View parent = (android.view.View)
+                    ((android.view.View) view).getParent();
+            if (parent == null) return;
+            parent.setTranslationY(ime > 200 ? base - ime : base);
+            log("ime shift " + (ime > 200 ? -ime : 0));
+        } catch (Throwable error) {
+            log("ime shift failed: " + error);
+        }
+    }
+
     /** 画布上下留的边距。 */
     private static int marginPx() {
         return Math.round(20f * android.content.res.Resources
@@ -1131,6 +1156,11 @@ final class CanvasLayout {
                     }
                 }
             });
+            XposedBridge.hookAllMethods(activity, "o1", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    shiftForIme(param);
+                }
+            });
             log("resume hooked");
         } catch (Throwable error) {
             log("resume hook failed: " + error);
@@ -1185,6 +1215,7 @@ final class CanvasLayout {
                             }
                         }
                         param.args[1] = ty;
+                        layoutTy.put(param.thisObject, ty);
                         log("A2 align ty=" + Math.round(ty) + " drawn=" + Math.round(drawn)
                                 + " avail=" + Math.round(avail));
                     } catch (Throwable error) {
