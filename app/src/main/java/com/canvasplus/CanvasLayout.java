@@ -1401,9 +1401,10 @@ final class CanvasLayout {
                             boolean animate = (Boolean) param.args[3];
                             try {
                                 Object adapter = fieldOfType(param.thisObject, "u1.c");
-                                // onLayout 每次都自动聚焦缩放，四窗默认要保持四等分
-                                if (adapter != null && count(adapter) == 4
-                                        && duration == 0 && !isFourZoomed(param.thisObject)) {
+                                // onLayout 每次都自动聚焦缩放，缩小态要保持总览
+                                boolean shrunk = !isFourZoomed(param.thisObject);
+                                if (adapter != null && duration == 0 && shrunk
+                                        && (count(adapter) == 4 || count(adapter) == 3)) {
                                     param.setResult(Boolean.FALSE);
                                     return;
                                 }
