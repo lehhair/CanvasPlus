@@ -25,6 +25,8 @@ final class CanvasLayout {
     private static final String TABLET_POLICY = "B1.r";
     private static final String CONTAINER_VIEW =
             "com.oplus.pscanvas.canvasmode.canvas.view.ContainerView";
+    private static final String CONTAINER_ACTIVITY =
+            "com.oplus.pscanvas.canvasmode.canvas.ContainerActivity";
     private static final String FLEXIBLE_TASK_VIEW =
             "com.oplus.flexiblewindow.FlexibleTaskView";
     static volatile int forcedMode = 0;
@@ -87,6 +89,7 @@ final class CanvasLayout {
         hookFullscreen(loader);
         hookTaskInfo(loader);
         hookResume(loader);
+        lockPortrait(loader);
         hookClick(loader);
         hookDragLock(loader);
         hookOrientation(loader);
@@ -1206,6 +1209,26 @@ final class CanvasLayout {
         return -1;
     }
 
+    /** 画布固定竖屏。pscanvas 自己会按窗口方向调 setRequestedOrientation，这里全拦下来。 */
+    private static void lockPortrait(ClassLoader loader) {
+        try {
+            XposedHelpers.findAndHookMethod("android.app.Activity", loader,
+                    "setRequestedOrientation", int.class, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            if (!CONTAINER_ACTIVITY.equals(
+                                    param.thisObject.getClass().getName())) {
+                                return;
+                            }
+                            param.args[0] = android.content.pm.ActivityInfo
+                                    .SCREEN_ORIENTATION_PORTRAIT;
+                        }
+                    });
+            log("portrait locked");
+        } catch (Throwable error) {
+            log("portrait lock failed: " + error);
+        }
+    }
+
     /** 画布被切走再回来时任务已经恢复成全屏，重新套一遍。 */
     private static void hookResume(ClassLoader loader) {
         try {
@@ -1213,6 +1236,13 @@ final class CanvasLayout {
                     "com.oplus.pscanvas.canvasmode.canvas.ContainerActivity", loader);
             XposedHelpers.findAndHookMethod(activity, "onResume", new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        // 触发一次方向设置，具体值由 lockPortrait 统一改成竖屏
+                        XposedHelpers.callMethod(param.thisObject,
+                                "setRequestedOrientation",
+                                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                    } catch (Throwable ignored) {
+                    }
                     try {
                         Object view = XposedHelpers.callMethod(param.thisObject, "x0");
                         if (view == null) return;
