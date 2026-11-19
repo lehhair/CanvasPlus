@@ -212,12 +212,30 @@ final class CanvasLayout {
                         if (enlarge) {
                             menuShrunk.remove(container);
                             fourZoomed.put(container, Boolean.TRUE);
-                            XposedHelpers.callMethod(param.args[1], "p0", true);
+                            int focus = 0;
+                            Object position = XposedHelpers.callMethod(
+                                    adapter, "getPosition", param.args[1]);
+                            if (position instanceof Integer && (Integer) position >= 0) {
+                                focus = (Integer) position;
+                            }
+                            for (int i = 0; i < total; i++) {
+                                Object task = XposedHelpers.callMethod(
+                                        adapter, "getItem", i);
+                                if (task != null) {
+                                    XposedHelpers.callMethod(task, "p0", i == focus);
+                                }
+                            }
                             zoomFourFocus(container, adapter, param.args[1]);
                         } else {
                             menuShrunk.put(container, Boolean.TRUE);
                             fourZoomed.put(container, Boolean.FALSE);
-                            XposedHelpers.callMethod(param.args[1], "p0", false);
+                            for (int i = 0; i < total; i++) {
+                                Object task = XposedHelpers.callMethod(
+                                        adapter, "getItem", i);
+                                if (task != null) {
+                                    XposedHelpers.callMethod(task, "p0", false);
+                                }
+                            }
                             if (total == 4) fitFour(container, 450);
                             else fitThree(container, 450);
                         }
@@ -373,34 +391,6 @@ final class CanvasLayout {
         }
     }
 
-    /** 画布重启后会恢复上次的放大布局，这里按实际缩放值把窗口状态同步回去。 */
-    private static void syncZoomState(Object container) {
-        try {
-            Object adapter = fieldOfType(container, "u1.c");
-            if (adapter == null) return;
-            int total = count(adapter);
-            if (total < 3) return;
-            android.view.View parent =
-                    (android.view.View) ((android.view.View) container).getParent();
-            float scale = parent == null ? 0f : parent.getScaleX();
-            Object focus = XposedHelpers.callMethod(adapter, "h");
-            int index = focus instanceof Integer ? (Integer) focus : 0;
-            boolean zoomed = scale > 0.7f;
-            for (int i = 0; i < total; i++) {
-                Object task = XposedHelpers.callMethod(adapter, "getItem", i);
-                if (task != null) {
-                    XposedHelpers.callMethod(task, "p0", zoomed && i == index);
-                }
-            }
-            fourZoomed.put(container, Boolean.valueOf(zoomed));
-            // 启动时系统自己会调一次"缩小"，不能算成用户手动缩小
-            menuShrunk.remove(container);
-            log("sync zoom scale=" + scale + " zoomed=" + zoomed + " focus=" + index);
-        } catch (Throwable error) {
-            log("sync zoom failed: " + error);
-        }
-    }
-
     /** 画布上下留的边距。 */
     private static int marginPx() {
         return Math.round(20f * android.content.res.Resources
@@ -408,6 +398,23 @@ final class CanvasLayout {
     }
 
     /** 三窗总览：内容整体缩放到可用区域。 */
+    /** 三窗默认进入缩小总览，和四窗保持一致。 */
+    private static void fitThreeDefault(Object container) {
+        try {
+            Object adapter = fieldOfType(container, "u1.c");
+            if (adapter == null || count(adapter) != 3) return;
+            fitThree(container, 0);
+            for (int i = 0; i < 3; i++) {
+                Object task = XposedHelpers.callMethod(adapter, "getItem", i);
+                if (task != null) XposedHelpers.callMethod(task, "p0", false);
+            }
+            fourZoomed.put(container, Boolean.FALSE);
+            log("three default fit");
+        } catch (Throwable error) {
+            log("three default fit failed: " + error);
+        }
+    }
+
     private static void fitThree(Object container, int duration) {
         try {
             Object adapter = fieldOfType(container, "u1.c");
@@ -1301,9 +1308,9 @@ final class CanvasLayout {
                                         syncTaskData(view);
                                         forcePhoneSize(view);
                                         XposedHelpers.callMethod(view, "N2");
-                                        new android.os.Handler(android.os.Looper.getMainLooper())
-                                                .postDelayed(() -> syncZoomState(view), 600);
                                         startWatchdog(view);
+                                        new android.os.Handler(android.os.Looper.getMainLooper())
+                                                .postDelayed(() -> fitThreeDefault(view), 300);
                                     } catch (Throwable error) {
                                         log("resume reapply failed: " + error);
                                     }
@@ -1416,7 +1423,15 @@ final class CanvasLayout {
                                     return;
                                 }
                                 if (total == 3) {
+                                    // 三窗点窗口就是放大：和四窗一样把状态同步好
                                     fourZoomed.put(param.thisObject, Boolean.TRUE);
+                                    for (int i = 0; i < total; i++) {
+                                        Object task = XposedHelpers.callMethod(
+                                                adapter, "getItem", i);
+                                        if (task != null) {
+                                            XposedHelpers.callMethod(task, "p0", i == index);
+                                        }
+                                    }
                                 }
                                 if (total == 4) {
                                     // 四窗点窗口就是放大：同步状态，菜单才会变成"缩小窗口"
@@ -1437,31 +1452,6 @@ final class CanvasLayout {
                             }
                         }
 
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            try {
-                                Object adapter = fieldOfType(param.thisObject, "u1.c");
-                                // 三窗点窗口放大后，菜单靠 task.p0() 决定显示放大还是缩小
-                                int total = adapter == null ? 0 : count(adapter);
-                                int duration = (Integer) param.args[1];
-                                boolean animate = (Boolean) param.args[3];
-                                if (total == 3 && duration == 450 && animate
-                                        && !Boolean.TRUE.equals(param.getObjectExtra(
-                                                "canvasplus.skipped"))) {
-                                    Object focus = XposedHelpers.callMethod(adapter, "h");
-                                    int index = focus instanceof Integer ? (Integer) focus : -1;
-                                    for (int i = 0; i < total; i++) {
-                                        Object task = XposedHelpers.callMethod(
-                                                adapter, "getItem", i);
-                                        if (task != null) {
-                                            XposedHelpers.callMethod(task, "p0", i == index);
-                                        }
-                                    }
-                                    fourZoomed.put(param.thisObject, Boolean.TRUE);
-                                    log("three zoom state focus=" + index);
-                                }
-                            } catch (Throwable ignored) {
-                            }
-                        }
                     });
             log("click hooked");
         } catch (Throwable error) {
