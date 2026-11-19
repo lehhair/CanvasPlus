@@ -295,7 +295,7 @@ final class CanvasLayout {
 
     /**
      * 输入法高度变化：o1(int) 是画布自己从 window insets 里读到的 IME 高度，
-     * 键盘弹出就把画布整体往上抬这么多，收起回到基准位置。
+     * 键盘弹出时把画布往上抬到焦点窗口底边露出来，收起回到基准位置。
      */
     private static void shiftForIme(XC_MethodHook.MethodHookParam param) {
         try {
@@ -307,10 +307,46 @@ final class CanvasLayout {
             android.view.View parent = (android.view.View)
                     ((android.view.View) view).getParent();
             if (parent == null) return;
-            parent.setTranslationY(ime > 200 ? base - ime : base);
-            log("ime shift " + (ime > 200 ? -ime : 0));
+            int shift = 0;
+            if (ime > 200) {
+                shift = coveredByIme(view, parent, base, ime);
+                if (shift < 0) shift = ime;
+                shift = Math.min(shift, ime);
+            }
+            parent.setTranslationY(base - shift);
+            log("ime shift " + shift);
         } catch (Throwable error) {
             log("ime shift failed: " + error);
+        }
+    }
+
+    /**
+     * 焦点窗口被键盘挡住的高度。view 可能已经停在上一轮的抬升位置上，
+     * 先减掉当前的偏移量换回原位再算。算不出来返回 -1，调用方按抬满处理。
+     */
+    private static int coveredByIme(Object container, android.view.View parent,
+                                    float base, int ime) {
+        try {
+            Object adapter = fieldOfType(container, "u1.c");
+            if (adapter == null) return -1;
+            int total = count(adapter);
+            if (total < 2) return -1;
+            Object focus = XposedHelpers.callMethod(adapter, "h");
+            int index = focus instanceof Integer ? (Integer) focus : 0;
+            if (index < 0 || index >= total) index = 0;
+            Object decor = XposedHelpers.callMethod(container, "q0", index);
+            if (decor == null) return -1;
+            Object taskView = XposedHelpers.callMethod(decor, "getFlexibleTaskView");
+            if (!(taskView instanceof android.view.View)) return -1;
+            Rect rect = new Rect();
+            XposedHelpers.callMethod(taskView, "getBoundsOnScreen", rect);
+            if (rect.isEmpty()) return -1;
+            float delta = parent.getTranslationY() - base;
+            int bottom = Math.round(rect.bottom - delta);
+            int keyboardTop = parent.getHeight() - ime;
+            return Math.max(0, bottom - keyboardTop);
+        } catch (Throwable error) {
+            return -1;
         }
     }
 
