@@ -1281,6 +1281,23 @@ final class CanvasLayout {
                                         + " view=" + self.getWidth() + "x" + self.getHeight()
                                         + " parent=" + parent.getWidth() + "x" + parent.getHeight()
                                         + " rects=" + rects);
+                                // 三窗点窗口放大后，菜单靠 task.p0() 决定显示放大还是缩小
+                                int total = adapter == null ? 0 : count(adapter);
+                                int duration = (Integer) param.args[1];
+                                boolean animate = (Boolean) param.args[3];
+                                if (total == 3 && duration == 450 && animate) {
+                                    Object focus = XposedHelpers.callMethod(adapter, "h");
+                                    int index = focus instanceof Integer ? (Integer) focus : -1;
+                                    for (int i = 0; i < total; i++) {
+                                        Object task = XposedHelpers.callMethod(
+                                                adapter, "getItem", i);
+                                        if (task != null) {
+                                            XposedHelpers.callMethod(task, "p0", i == index);
+                                        }
+                                    }
+                                    fourZoomed.put(param.thisObject, Boolean.TRUE);
+                                    log("three zoom state focus=" + index);
+                                }
                             } catch (Throwable ignored) {
                             }
                         }
