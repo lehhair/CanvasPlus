@@ -393,6 +393,8 @@ final class CanvasLayout {
                 }
             }
             fourZoomed.put(container, Boolean.valueOf(zoomed));
+            // 启动时系统自己会调一次"缩小"，不能算成用户手动缩小
+            menuShrunk.remove(container);
             log("sync zoom scale=" + scale + " zoomed=" + zoomed + " focus=" + index);
         } catch (Throwable error) {
             log("sync zoom failed: " + error);
