@@ -121,6 +121,9 @@ final class CanvasLayout {
                     new XC_MethodHook() {
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             try {
+                                // 只在输入法把画布抬高、窗口出界时才补挖洞。
+                                // 平时交给框架原生逻辑，别破坏放大态下点击小窗口切换的行为。
+                                if (!imeActive) return;
                                 Object view = XposedHelpers.getObjectField(
                                         param.thisObject, "this$0");
                                 if (view == null) return;
@@ -334,6 +337,9 @@ final class CanvasLayout {
     private static final java.util.WeakHashMap<Object, Float> layoutTy =
             new java.util.WeakHashMap<>();
 
+    /** 输入法正把画布抬高。只有这时才需要补挖洞，平时别碰框架原本的触摸区域。 */
+    private static volatile boolean imeActive;
+
     /**
      * 输入法高度变化：o1(int) 是画布自己从 window insets 里读到的 IME 高度，
      * 键盘弹出时把画布往上抬到焦点窗口底边露出来，收起回到基准位置。
@@ -355,6 +361,7 @@ final class CanvasLayout {
                 shift = Math.min(shift, ime);
             }
             parent.setTranslationY(base - shift);
+            imeActive = shift > 0;
             log("ime shift " + shift);
         } catch (Throwable error) {
             log("ime shift failed: " + error);
