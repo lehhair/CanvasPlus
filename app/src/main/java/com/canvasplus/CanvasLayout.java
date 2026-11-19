@@ -103,39 +103,16 @@ final class CanvasLayout {
     }
 
     /**
-     * 三窗时窗口菜单里的"放大窗口/缩小窗口"用不了，直接不给这两项。
-     * 菜单在 t.e0() 末尾统一 add 进 t.W，这里加完再把它们摘掉。
+     * 三窗和四窗都保留窗口菜单里的"放大窗口/缩小窗口"。
+     * 四窗的放大走 2×2 网格，三窗的放大走官方 a0 焦点缩放。
      */
     private static void hookWindowMenu(ClassLoader loader) {
         try {
             Class<?> menu = XposedHelpers.findClass(
                     "com.oplus.pscanvas.canvasmode.canvas.t", loader);
-            Class<?> strings = XposedHelpers.findClass("t1.j", loader);
-            final int enlargeId = XposedHelpers.getStaticIntField(strings, "W");
-            final int narrowId = XposedHelpers.getStaticIntField(strings, "X");
             XposedBridge.hookAllMethods(menu, "e0", new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
-                    try {
-                        Object self = param.thisObject;
-                        Object container = XposedHelpers.getObjectField(self, "n");
-                        Object adapter = fieldOfType(container, "u1.c");
-                        if (adapter == null || count(adapter) != 3) return;
-                        Object items = XposedHelpers.getObjectField(self, "W");
-                        if (!(items instanceof java.util.List)) return;
-                        android.content.Context context =
-                                (android.content.Context) XposedHelpers.getObjectField(self, "j");
-                        String enlarge = context.getResources().getString(enlargeId);
-                        String narrow = context.getResources().getString(narrowId);
-                        ((java.util.List<?>) items).removeIf(item -> {
-                            try {
-                                Object title = XposedHelpers.callMethod(item, "t");
-                                return enlarge.equals(title) || narrow.equals(title);
-                            } catch (Throwable ignored) {
-                                return false;
-                            }
-                        });
-                    } catch (Throwable ignored) {
-                    }
+                    log("window menu built");
                 }
             });
             log("window menu hooked");
@@ -167,7 +144,9 @@ final class CanvasLayout {
                     try {
                         Object container = param.args[0];
                         Object adapter = fieldOfType(container, "u1.c");
-                        if (adapter == null || count(adapter) != 4) return;
+                        if (adapter == null) return;
+                        int total = count(adapter);
+                        if (total < 3) return;
                         boolean enlarge = (Boolean) param.args[2];
                         if (enlarge) {
                             fourZoomed.put(container, Boolean.TRUE);
@@ -176,7 +155,8 @@ final class CanvasLayout {
                         } else {
                             fourZoomed.put(container, Boolean.FALSE);
                             XposedHelpers.callMethod(param.args[1], "p0", false);
-                            fitFour(container, 450);
+                            if (total == 4) fitFour(container, 450);
+                            else fitThree(container, 450);
                         }
                         param.setResult(null);
                         log("four zoom " + (enlarge ? "in" : "out"));
@@ -273,6 +253,28 @@ final class CanvasLayout {
     private static int marginPx() {
         return Math.round(20f * android.content.res.Resources
                 .getSystem().getDisplayMetrics().density);
+    }
+
+    /** 三窗总览：内容整体缩放到可用区域。 */
+    private static void fitThree(Object container, int duration) {
+        try {
+            Object adapter = fieldOfType(container, "u1.c");
+            if (adapter == null || count(adapter) != 3) return;
+            Rect union = contentRect(container);
+            if (union == null) return;
+            android.view.View view = (android.view.View) container;
+            android.view.View parent = (android.view.View) view.getParent();
+            if (parent == null) return;
+            float avail = parent.getHeight() - statusBarHeight() - marginPx() * 2f;
+            float scale = Math.min((float) parent.getWidth() / union.width(),
+                    avail / union.height());
+            if (scale <= 0f || scale > 1f) return;
+            // 平移量由 A2 的 hook 统一算
+            XposedHelpers.callMethod(container, "A2", 0f, 0f, scale, duration, 0);
+            log("three fit scale=" + scale);
+        } catch (Throwable error) {
+            log("three fit failed: " + error);
+        }
     }
 
     /** 四等分：画布缩放到 2×2 总尺寸正好放进屏幕。 */
@@ -1209,6 +1211,9 @@ final class CanvasLayout {
                                 int total = adapter == null ? 0 : count(adapter);
                                 // 二窗是系统原生分屏，点击走原版聚焦
                                 if (total < 3) return;
+                                if (total == 3) {
+                                    fourZoomed.put(param.thisObject, Boolean.TRUE);
+                                }
                                 if (total == 4) {
                                     // 四窗点窗口就是放大：同步状态，菜单才会变成"缩小窗口"
                                     fourZoomed.put(param.thisObject, Boolean.TRUE);
