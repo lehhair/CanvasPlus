@@ -1146,6 +1146,9 @@ final class CanvasLayout {
                     log("A2 tx=" + param.args[0] + " ty=" + param.args[1]
                             + " scale=" + param.args[2] + " mode=" + param.args[4]);
                     try {
+                        // mode 3 是输入法上移，官方已经算好 ty，别重算
+                        int mode = (Integer) param.args[4];
+                        if (mode == 3) return;
                         Object adapter = fieldOfType(param.thisObject, "u1.c");
                         if (adapter == null) return;
                         int total = count(adapter);
