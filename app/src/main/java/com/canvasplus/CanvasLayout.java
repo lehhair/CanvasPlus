@@ -172,6 +172,24 @@ final class CanvasLayout {
         return Boolean.TRUE.equals(fourZoomed.get(container));
     }
 
+    /** 用户从这个菜单缩小过。只有这种状态下点击窗口才不放大。 */
+    private static final java.util.WeakHashMap<Object, Boolean> menuShrunk =
+            new java.util.WeakHashMap<>();
+
+    /** 设置项：缩小后点击窗口不放大。用 LSPosed 的 XSharedPreferences 读模块设置。 */
+    private static boolean noClickZoom() {
+        try {
+            de.robv.android.xposed.XSharedPreferences prefs =
+                    new de.robv.android.xposed.XSharedPreferences(
+                            "com.canvasplus", Settings.PREFS);
+            if (!prefs.getFile().canRead()) return false;
+            prefs.reload();
+            return prefs.getBoolean(Settings.NO_CLICK_ZOOM, true);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     /**
      * 四窗的"放大窗口/缩小窗口"。
      *
@@ -192,10 +210,12 @@ final class CanvasLayout {
                         if (total < 3) return;
                         boolean enlarge = (Boolean) param.args[2];
                         if (enlarge) {
+                            menuShrunk.remove(container);
                             fourZoomed.put(container, Boolean.TRUE);
                             XposedHelpers.callMethod(param.args[1], "p0", true);
                             zoomFourFocus(container, adapter, param.args[1]);
                         } else {
+                            menuShrunk.put(container, Boolean.TRUE);
                             fourZoomed.put(container, Boolean.FALSE);
                             XposedHelpers.callMethod(param.args[1], "p0", false);
                             if (total == 4) fitFour(container, 450);
@@ -350,6 +370,32 @@ final class CanvasLayout {
             return Math.max(0, bottom - keyboardTop);
         } catch (Throwable error) {
             return -1;
+        }
+    }
+
+    /** 画布重启后会恢复上次的放大布局，这里按实际缩放值把窗口状态同步回去。 */
+    private static void syncZoomState(Object container) {
+        try {
+            Object adapter = fieldOfType(container, "u1.c");
+            if (adapter == null) return;
+            int total = count(adapter);
+            if (total < 3) return;
+            android.view.View parent =
+                    (android.view.View) ((android.view.View) container).getParent();
+            float scale = parent == null ? 0f : parent.getScaleX();
+            Object focus = XposedHelpers.callMethod(adapter, "h");
+            int index = focus instanceof Integer ? (Integer) focus : 0;
+            boolean zoomed = scale > 0.7f;
+            for (int i = 0; i < total; i++) {
+                Object task = XposedHelpers.callMethod(adapter, "getItem", i);
+                if (task != null) {
+                    XposedHelpers.callMethod(task, "p0", zoomed && i == index);
+                }
+            }
+            fourZoomed.put(container, Boolean.valueOf(zoomed));
+            log("sync zoom scale=" + scale + " zoomed=" + zoomed + " focus=" + index);
+        } catch (Throwable error) {
+            log("sync zoom failed: " + error);
         }
     }
 
@@ -1253,6 +1299,8 @@ final class CanvasLayout {
                                         syncTaskData(view);
                                         forcePhoneSize(view);
                                         XposedHelpers.callMethod(view, "N2");
+                                        new android.os.Handler(android.os.Looper.getMainLooper())
+                                                .postDelayed(() -> syncZoomState(view), 600);
                                         startWatchdog(view);
                                     } catch (Throwable error) {
                                         log("resume reapply failed: " + error);
@@ -1351,6 +1399,20 @@ final class CanvasLayout {
                                 int total = adapter == null ? 0 : count(adapter);
                                 // 二窗是系统原生分屏，点击走原版聚焦
                                 if (total < 3) return;
+                                // 从菜单缩小之后，点击窗口只切焦点，放大走窗口菜单
+                                if (noClickZoom()
+                                        && Boolean.TRUE.equals(
+                                                menuShrunk.get(param.thisObject))) {
+                                    int mode = (Integer) param.args[2];
+                                    boolean focus = (Boolean) param.args[3];
+                                    if (focus && mode != 2) {
+                                        XposedHelpers.callMethod(adapter, "I", index);
+                                    }
+                                    param.setObjectExtra("canvasplus.skipped", Boolean.TRUE);
+                                    param.setResult(Boolean.FALSE);
+                                    log("click zoom skipped");
+                                    return;
+                                }
                                 if (total == 3) {
                                     fourZoomed.put(param.thisObject, Boolean.TRUE);
                                 }
@@ -1375,23 +1437,14 @@ final class CanvasLayout {
 
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             try {
-                                android.view.View self = (android.view.View) param.thisObject;
-                                android.view.View parent = (android.view.View) self.getParent();
-                                Object adapter = fieldOfType(self, "u1.c");
-                                Object rects = XposedHelpers.getObjectField(self, "l");
-                                log("T focus=" + param.args[0] + " result=" + param.getResult()
-                                        + " count=" + (adapter == null ? -1 : count(adapter))
-                                        + " scale=" + parent.getScaleX()
-                                        + " tx=" + parent.getTranslationX()
-                                        + " ty=" + parent.getTranslationY()
-                                        + " view=" + self.getWidth() + "x" + self.getHeight()
-                                        + " parent=" + parent.getWidth() + "x" + parent.getHeight()
-                                        + " rects=" + rects);
+                                Object adapter = fieldOfType(param.thisObject, "u1.c");
                                 // 三窗点窗口放大后，菜单靠 task.p0() 决定显示放大还是缩小
                                 int total = adapter == null ? 0 : count(adapter);
                                 int duration = (Integer) param.args[1];
                                 boolean animate = (Boolean) param.args[3];
-                                if (total == 3 && duration == 450 && animate) {
+                                if (total == 3 && duration == 450 && animate
+                                        && !Boolean.TRUE.equals(param.getObjectExtra(
+                                                "canvasplus.skipped"))) {
                                     Object focus = XposedHelpers.callMethod(adapter, "h");
                                     int index = focus instanceof Integer ? (Integer) focus : -1;
                                     for (int i = 0; i < total; i++) {
