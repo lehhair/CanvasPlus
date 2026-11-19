@@ -355,7 +355,9 @@ final class CanvasLayout {
                     ((android.view.View) view).getParent();
             if (parent == null) return;
             int shift = 0;
-            if (ime > 200) {
+            // 二窗是系统原生分屏，键盘交给系统自己处理，这里只增强三窗和四窗
+            Object adapter = fieldOfType(view, "u1.c");
+            if (ime > 200 && adapter != null && count(adapter) >= 3) {
                 shift = coveredByIme(view, parent, base, ime);
                 if (shift < 0) shift = ime;
                 shift = Math.min(shift, ime);
@@ -1313,6 +1315,9 @@ final class CanvasLayout {
                                     try {
                                         attempts = 0;
                                         syncTaskData(view);
+                                        // 二窗是系统原生分屏，重排和看门狗都留给系统
+                                        Object adapter = fieldOfType(view, "u1.c");
+                                        if (adapter == null || count(adapter) < 3) return;
                                         forcePhoneSize(view);
                                         XposedHelpers.callMethod(view, "N2");
                                         startWatchdog(view);
