@@ -1526,6 +1526,13 @@ final class CanvasLayout {
             boolean justLeftThree = last != null && last >= 3 && count < 3;
             if (last != null && last != count) {
                 layoutKeys.remove(container);
+                // 四窗总览是 2×2 的缩放值，关掉一个窗口后画布还停在这个比例上，
+                // 三窗矩形塞不进去画面就是坏的。这里按三窗重新算一次总览。
+                if (last == 4 && count == 3 && !isFourZoomed(container)) {
+                    final Object canvas = container;
+                    new android.os.Handler(android.os.Looper.getMainLooper())
+                            .post(() -> fitThree(canvas, 0));
+                }
             }
             taskCounts.put(container, count);
             windowCount = count;
