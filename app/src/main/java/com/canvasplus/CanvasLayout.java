@@ -223,22 +223,56 @@ final class CanvasLayout {
         }
     }
 
-    /** 三窗内容缩放后比视图矮多少（屏幕像素）。 */
-    private static float contentGap(Object container, float scale) {
+    /** 画布内容的整体矩形。 */
+    private static Rect contentRect(Object container) {
         try {
             Object rects = XposedHelpers.getObjectField(container, "l");
-            if (!(rects instanceof java.util.List)) return 0f;
+            if (!(rects instanceof java.util.List)) return null;
             Rect union = new Rect();
+            boolean any = false;
             for (Object item : (java.util.List<?>) rects) {
-                if (item instanceof Rect) union.union((Rect) item);
+                if (item instanceof Rect) {
+                    union.union((Rect) item);
+                    any = true;
+                }
             }
-            if (union.isEmpty()) return 0f;
-            android.view.View view = (android.view.View) container;
-            float gap = view.getHeight() - union.height() * scale;
-            return gap > 0f ? gap : 0f;
+            return any ? union : null;
         } catch (Throwable error) {
-            return 0f;
+            return null;
         }
+    }
+
+    /** 放大时按焦点窗口的位置算平移量，装不下就顶部对齐。 */
+    private static float focusAlign(Object container, Object adapter, Rect union,
+                                    float scale, int viewTop, float topInset,
+                                    float bottomInset, int parentHeight) {
+        try {
+            Object focus = XposedHelpers.callMethod(adapter, "h");
+            if (!(focus instanceof Integer)) return Float.NaN;
+            Object rects = XposedHelpers.getObjectField(container, "l");
+            if (!(rects instanceof java.util.List)) return Float.NaN;
+            java.util.List<?> list = (java.util.List<?>) rects;
+            int index = (Integer) focus;
+            if (index < 0 || index >= list.size()) return Float.NaN;
+            Object item = list.get(index);
+            if (!(item instanceof Rect)) return Float.NaN;
+            Rect rect = (Rect) item;
+            float top = (viewTop + rect.top) * scale;
+            float height = (rect.bottom - rect.top) * scale;
+            float avail = parentHeight - topInset - bottomInset;
+            if (height <= avail) {
+                return topInset + (avail - height) / 2f - top;
+            }
+            return topInset - top;
+        } catch (Throwable error) {
+            return Float.NaN;
+        }
+    }
+
+    /** 画布上下留的边距。 */
+    private static int marginPx() {
+        return Math.round(20f * android.content.res.Resources
+                .getSystem().getDisplayMetrics().density);
     }
 
     /** 四等分：画布缩放到 2×2 总尺寸正好放进屏幕。 */
@@ -251,17 +285,15 @@ final class CanvasLayout {
                     .getSystem().getDisplayMetrics().density);
             android.view.View view = (android.view.View) container;
             android.view.View parent = (android.view.View) view.getParent();
+            if (parent == null) return;
+            // 上下各留一点，别贴着状态栏和屏幕底
+            float avail = parent.getHeight() - statusBarHeight() - marginPx() * 2;
             float fit = Math.min(
                     (float) view.getWidth() / (2 * cell.width() + gap),
-                    (float) view.getHeight() / (2 * cell.height() + gap));
+                    avail / (2 * cell.height() + gap));
             if (fit <= 0f || fit > 1f) return;
-            // view 本身在状态栏下方，但 pivot 是 (0,0)，缩放后这段距离被缩掉了，
-            // 平移量要把差额补回来，内容顶部才落在状态栏下沿
-            float ty = statusBarHeight() - view.getTop() * fit;
-            log("four geo fit=" + fit + " viewTop=" + view.getTop()
-                    + " ty=" + ty + " pivot=" + parent.getPivotX()
-                    + "," + parent.getPivotY());
-            XposedHelpers.callMethod(container, "A2", 0f, ty, fit, duration, 4);
+            // 平移量交给 A2 的 hook 统一算
+            XposedHelpers.callMethod(container, "A2", 0f, 0f, fit, duration, 4);
         } catch (Throwable error) {
             log("four fit failed: " + error);
         }
@@ -1113,17 +1145,45 @@ final class CanvasLayout {
                             + " scale=" + param.args[2] + " mode=" + param.args[4]);
                     try {
                         Object adapter = fieldOfType(param.thisObject, "u1.c");
-                        if (adapter == null || count(adapter) != 3) return;
+                        if (adapter == null) return;
+                        int total = count(adapter);
+                        if (total < 3) return;
                         float scale = (Float) param.args[2];
                         if (scale <= 0f) return;
-                        float gap = contentGap(param.thisObject, scale);
-                        if (gap <= 0.5f) return;
-                        // 官方算出来的平移量固定贴顶，这里补上底部空隙。
-                        // 绝对值修改，点击放大时 scale 变大、gap 变 0，自然不生效。
-                        param.args[1] = (Float) param.args[1] + gap;
-                        log("A2 nudge down " + Math.round(gap));
+                        android.view.View self = (android.view.View) param.thisObject;
+                        android.view.View parent = (android.view.View) self.getParent();
+                        Rect union = contentRect(param.thisObject);
+                        if (union == null || parent == null) return;
+
+                        int margin = marginPx();
+                        float topInset = statusBarHeight() + margin;
+                        float bottomInset = margin;
+                        // pivot 是 (0,0)，view 自己的 top 会被缩放吃掉，先补回来
+                        float base = topInset - self.getTop() * scale;
+                        float avail = parent.getHeight() - topInset - bottomInset;
+                        float drawn = union.height() * scale;
+                        float ty;
+                        if (drawn <= avail + 1f) {
+                            // 整体放得下：上下左右都居中
+                            ty = base + (avail - drawn) / 2f;
+                            float width = union.width() * scale;
+                            if (width < parent.getWidth()) {
+                                param.args[0] = (parent.getWidth() - width) / 2f;
+                            }
+                        } else {
+                            // 有窗口放大：按焦点窗口摆，别让它的底边跑出屏幕
+                            ty = focusAlign(param.thisObject, adapter, union, scale,
+                                    self.getTop(), topInset, bottomInset,
+                                    parent.getHeight());
+                            if (Float.isNaN(ty)) {
+                                ty = (Float) param.args[1] + base;
+                            }
+                        }
+                        param.args[1] = ty;
+                        log("A2 align ty=" + Math.round(ty) + " drawn=" + Math.round(drawn)
+                                + " avail=" + Math.round(avail));
                     } catch (Throwable error) {
-                        log("A2 nudge failed: " + error);
+                        log("A2 align failed: " + error);
                     }
                 }
             });
