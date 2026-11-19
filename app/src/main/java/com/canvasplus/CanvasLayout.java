@@ -223,6 +223,24 @@ final class CanvasLayout {
         }
     }
 
+    /** 三窗内容缩放后比视图矮多少（屏幕像素）。 */
+    private static float contentGap(Object container, float scale) {
+        try {
+            Object rects = XposedHelpers.getObjectField(container, "l");
+            if (!(rects instanceof java.util.List)) return 0f;
+            Rect union = new Rect();
+            for (Object item : (java.util.List<?>) rects) {
+                if (item instanceof Rect) union.union((Rect) item);
+            }
+            if (union.isEmpty()) return 0f;
+            android.view.View view = (android.view.View) container;
+            float gap = view.getHeight() - union.height() * scale;
+            return gap > 0f ? gap : 0f;
+        } catch (Throwable error) {
+            return 0f;
+        }
+    }
+
     /** 四等分：画布缩放到 2×2 总尺寸正好放进屏幕。 */
     private static void fitFour(Object container, int duration) {
         try {
@@ -232,11 +250,18 @@ final class CanvasLayout {
             int gap = Math.round(10f * android.content.res.Resources
                     .getSystem().getDisplayMetrics().density);
             android.view.View view = (android.view.View) container;
+            android.view.View parent = (android.view.View) view.getParent();
             float fit = Math.min(
                     (float) view.getWidth() / (2 * cell.width() + gap),
                     (float) view.getHeight() / (2 * cell.height() + gap));
             if (fit <= 0f || fit > 1f) return;
-            XposedHelpers.callMethod(container, "A2", 0f, 0f, fit, duration, 4);
+            // view 本身在状态栏下方，但 pivot 是 (0,0)，缩放后这段距离被缩掉了，
+            // 平移量要把差额补回来，内容顶部才落在状态栏下沿
+            float ty = statusBarHeight() - view.getTop() * fit;
+            log("four geo fit=" + fit + " viewTop=" + view.getTop()
+                    + " ty=" + ty + " pivot=" + parent.getPivotX()
+                    + "," + parent.getPivotY());
+            XposedHelpers.callMethod(container, "A2", 0f, ty, fit, duration, 4);
         } catch (Throwable error) {
             log("four fit failed: " + error);
         }
@@ -1082,6 +1107,26 @@ final class CanvasLayout {
     private static void hookClick(ClassLoader loader) {
         try {
             Class<?> view = XposedHelpers.findClass(CONTAINER_VIEW, loader);
+            XposedBridge.hookAllMethods(view, "A2", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    log("A2 tx=" + param.args[0] + " ty=" + param.args[1]
+                            + " scale=" + param.args[2] + " mode=" + param.args[4]);
+                    try {
+                        Object adapter = fieldOfType(param.thisObject, "u1.c");
+                        if (adapter == null || count(adapter) != 3) return;
+                        float scale = (Float) param.args[2];
+                        if (scale <= 0f) return;
+                        float gap = contentGap(param.thisObject, scale);
+                        if (gap <= 0.5f) return;
+                        // 官方算出来的平移量固定贴顶，这里补上底部空隙。
+                        // 绝对值修改，点击放大时 scale 变大、gap 变 0，自然不生效。
+                        param.args[1] = (Float) param.args[1] + gap;
+                        log("A2 nudge down " + Math.round(gap));
+                    } catch (Throwable error) {
+                        log("A2 nudge failed: " + error);
+                    }
+                }
+            });
             XposedHelpers.findAndHookMethod(view, "T",
                     int.class, int.class, int.class, boolean.class, new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
@@ -1118,6 +1163,24 @@ final class CanvasLayout {
                                 XposedHelpers.callMethod(param.thisObject, "N2");
                             } catch (Throwable error) {
                                 log("click refresh failed: " + error);
+                            }
+                        }
+
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                android.view.View self = (android.view.View) param.thisObject;
+                                android.view.View parent = (android.view.View) self.getParent();
+                                Object adapter = fieldOfType(self, "u1.c");
+                                Object rects = XposedHelpers.getObjectField(self, "l");
+                                log("T focus=" + param.args[0] + " result=" + param.getResult()
+                                        + " count=" + (adapter == null ? -1 : count(adapter))
+                                        + " scale=" + parent.getScaleX()
+                                        + " tx=" + parent.getTranslationX()
+                                        + " ty=" + parent.getTranslationY()
+                                        + " view=" + self.getWidth() + "x" + self.getHeight()
+                                        + " parent=" + parent.getWidth() + "x" + parent.getHeight()
+                                        + " rects=" + rects);
+                            } catch (Throwable ignored) {
                             }
                         }
                     });
