@@ -1152,13 +1152,17 @@ final class CanvasLayout {
                     if (multiWindowMode) dumpLayout(param.thisObject);
                     try {
                         Object adapter = fieldOfType(param.thisObject, "u1.c");
-                        if (adapter != null && count(adapter) == 4) {
-                            final Object canvas = param.thisObject;
-                            if (!isFourZoomed(canvas)) {
-                                new android.os.Handler(android.os.Looper.getMainLooper())
-                                        .post(() -> fitFour(canvas, 0));
-                            }
-                        }
+                        if (adapter == null) return;
+                        int panes = count(adapter);
+                        if (panes < 3 || isFourZoomed(param.thisObject)) return;
+                        // 布局完成时画布可能还停在 1.0（尤其是从二窗加进第三个应用），
+                        // 补一次总览缩放，别等用户碰一下才恢复
+                        final Object canvas = param.thisObject;
+                        new android.os.Handler(android.os.Looper.getMainLooper())
+                                .post(() -> {
+                                    if (panes == 4) fitFour(canvas, 0);
+                                    else fitThree(canvas, 0);
+                                });
                     } catch (Throwable ignored) {
                     }
                 }
