@@ -467,23 +467,6 @@ final class CanvasLayout {
     }
 
     /** 三窗总览：内容整体缩放到可用区域。 */
-    /** 三窗默认进入缩小总览，和四窗保持一致。 */
-    private static void fitThreeDefault(Object container) {
-        try {
-            Object adapter = fieldOfType(container, "u1.c");
-            if (adapter == null || count(adapter) != 3) return;
-            fitThree(container, 0);
-            for (int i = 0; i < 3; i++) {
-                Object task = XposedHelpers.callMethod(adapter, "getItem", i);
-                if (task != null) XposedHelpers.callMethod(task, "p0", false);
-            }
-            fourZoomed.put(container, Boolean.FALSE);
-            log("three default fit");
-        } catch (Throwable error) {
-            log("three default fit failed: " + error);
-        }
-    }
-
     private static void fitThree(Object container, int duration) {
         try {
             Object adapter = fieldOfType(container, "u1.c");
@@ -1385,8 +1368,6 @@ final class CanvasLayout {
                                         forcePhoneSize(view);
                                         XposedHelpers.callMethod(view, "N2");
                                         startWatchdog(view);
-                                        new android.os.Handler(android.os.Looper.getMainLooper())
-                                                .postDelayed(() -> fitThreeDefault(view), 300);
                                     } catch (Throwable error) {
                                         log("resume reapply failed: " + error);
                                     }
