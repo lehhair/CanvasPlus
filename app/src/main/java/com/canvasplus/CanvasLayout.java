@@ -349,15 +349,19 @@ final class CanvasLayout {
             int ime = (Integer) param.args[0];
             Object view = XposedHelpers.callMethod(param.thisObject, "x0");
             if (view == null) return;
+            // 二窗是系统原生分屏，键盘完全交给系统，这里一点都别碰
+            Object adapter = fieldOfType(view, "u1.c");
+            if (adapter == null || count(adapter) < 3) {
+                imeActive = false;
+                return;
+            }
             Float base = layoutTy.get(view);
             if (base == null) return;
             android.view.View parent = (android.view.View)
                     ((android.view.View) view).getParent();
             if (parent == null) return;
             int shift = 0;
-            // 二窗是系统原生分屏，键盘交给系统自己处理，这里只增强三窗和四窗
-            Object adapter = fieldOfType(view, "u1.c");
-            if (ime > 200 && adapter != null && count(adapter) >= 3) {
+            if (ime > 200) {
                 shift = coveredByIme(view, parent, base, ime);
                 if (shift < 0) shift = ime;
                 shift = Math.min(shift, ime);
