@@ -363,10 +363,70 @@ final class CanvasLayout {
                 shift = Math.min(shift, ime);
             }
             parent.setTranslationY(base - shift);
+            moveFocusTask(view, shift, ime);
             imeActive = shift > 0;
             log("ime shift " + shift);
         } catch (Throwable error) {
             log("ime shift failed: " + error);
+        }
+    }
+
+    /** 键盘弹起前的窗口位置，恢复时按它回去。 */
+    private static final java.util.WeakHashMap<Object, Rect> taskOrigin =
+            new java.util.WeakHashMap<>();
+
+    /**
+     * 把焦点任务的窗口整体上移，让窗口和键盘不再重叠。
+     *
+     * 系统给嵌入式窗口算 IME inset 只看它自己的 frame，和我们挪 View 无关。
+     * 窗口一旦移出键盘区域，inset 就是 0，微信、抖音这些会自己处理键盘的
+     * 应用就不会再调整一遍，画布抬起只做一次。
+     *
+     * 基准用 mLaunchBounds（窗口逻辑尺寸），getBoundsOnScreen 是缩放后的
+     * 视觉矩形，拿它当 bounds 会把应用窗口改小，画面直接变形。
+     */
+    private static void moveFocusTask(Object container, int shift, int ime) {
+        try {
+            Object adapter = fieldOfType(container, "u1.c");
+            if (adapter == null) return;
+            Object focus = XposedHelpers.callMethod(adapter, "h");
+            int index = focus instanceof Integer ? (Integer) focus : 0;
+            Object decor = XposedHelpers.callMethod(container, "q0", index);
+            if (decor == null) return;
+            Object taskView = XposedHelpers.callMethod(decor, "getFlexibleTaskView");
+            if (taskView == null) return;
+            Object token = XposedHelpers.getObjectField(taskView, "mTaskToken");
+            if (token == null) return;
+            Rect origin = taskOrigin.get(taskView);
+            if (origin == null) {
+                Object launch = launchBoundsOf(taskView);
+                if (!(launch instanceof Rect) || ((Rect) launch).isEmpty()) return;
+                origin = new Rect((Rect) launch);
+                taskOrigin.put(taskView, origin);
+            }
+            Rect bounds = new Rect(origin);
+            android.view.View parent = (android.view.View)
+                    ((android.view.View) container).getParent();
+            if (shift > 0) {
+                // 窗口底边直接对齐到键盘顶边，别再按缩放比例换算，误差会被放大
+                int keyboardTop = parent == null ? bounds.bottom : parent.getHeight() - ime;
+                int offset = Math.max(0, bounds.bottom - keyboardTop);
+                bounds.offset(0, -offset);
+                log("task move " + offset + " parent=" + (parent == null ? -1 : parent.getHeight()));
+            } else {
+                taskOrigin.remove(taskView);
+            }
+            Object wct = XposedHelpers.newInstance(XposedHelpers.findClass(
+                    "android.window.WindowContainerTransaction",
+                    container.getClass().getClassLoader()));
+            XposedHelpers.callMethod(wct, "setBounds", token, bounds);
+            Object organizer = XposedHelpers.callMethod(taskView, "getTaskOrganizer");
+            if (organizer != null) {
+                XposedHelpers.callMethod(organizer, "applyTransaction", wct);
+            }
+            log("task bounds " + bounds);
+        } catch (Throwable error) {
+            log("task bounds failed: " + error);
         }
     }
 
